@@ -21,12 +21,19 @@ namespace Masuit.Tools.Security
         public string PrivateKey;
     }
 
+    public enum RsaKeyType
+    {
+        XML,
+        PKCS1,
+        PKCS8
+    }
+
     /// <summary> 
     /// RSA加密解密及RSA签名和验证
     /// </summary> 
     public static class RsaCrypt
     {
-        private static RsaKey RsaKey = GenerateRsaKeys();
+        private static RsaKey RsaKey;
         #region RSA 加密解密 
 
         #region RSA 的密钥产生 
@@ -34,13 +41,30 @@ namespace Masuit.Tools.Security
         /// <summary>
         /// 生成 RSA 公钥和私钥
         /// </summary>
-        public static RsaKey GenerateRsaKeys()
+        /// <param name="type">密钥类型</param>
+        /// <param name="length">密钥长度</param>
+        /// <returns></returns>
+        public static RsaKey GenerateRsaKeys(RsaKeyType type = RsaKeyType.XML, int length = 1024)
         {
-            using var rsa = new RSACryptoServiceProvider();
-            return RsaKey ??= new RsaKey
+            var rsa = new RSA(length);
+            return type switch
             {
-                PrivateKey = rsa.ToXmlString(true),
-                PublicKey = rsa.ToXmlString(false)
+                RsaKeyType.PKCS1 => RsaKey ??= new RsaKey
+                {
+                    PrivateKey = rsa.ToPEM_PKCS1(),
+                    PublicKey = rsa.ToPEM_PKCS1(true)
+                },
+                RsaKeyType.PKCS8 => RsaKey ??= new RsaKey
+                {
+                    PrivateKey = rsa.ToPEM_PKCS8(),
+                    PublicKey = rsa.ToPEM_PKCS8(true)
+                },
+                RsaKeyType.XML => RsaKey ??= new RsaKey
+                {
+                    PrivateKey = rsa.ToXML(),
+                    PublicKey = rsa.ToXML(true)
+                },
+                _ => throw new ArgumentOutOfRangeException(nameof(type), type, null)
             };
         }
 
@@ -57,11 +81,8 @@ namespace Masuit.Tools.Security
         /// <exception cref="CryptographicException">The cryptographic service provider (CSP) cannot be acquired. </exception>
         public static string RSAEncrypt(this string mStrEncryptString, string publicKey)
         {
-            using var rsa = new RSACryptoServiceProvider();
-            rsa.FromXmlString(publicKey);
-            var plainTextBArray = new UnicodeEncoding().GetBytes(mStrEncryptString);
-            var cypherTextBArray = rsa.Encrypt(plainTextBArray, false);
-            return Convert.ToBase64String(cypherTextBArray);
+            var rsa = new RSA(publicKey);
+            return rsa.Encrypt(mStrEncryptString);
         }
 
         /// <summary>
@@ -84,10 +105,8 @@ namespace Masuit.Tools.Security
         /// <exception cref="CryptographicException">The cryptographic service provider (CSP) cannot be acquired. </exception>
         public static string RSAEncrypt(this byte[] encryptString, string publicKey)
         {
-            using var rsa = new RSACryptoServiceProvider();
-            rsa.FromXmlString(publicKey);
-            var cypherTextBArray = rsa.Encrypt(encryptString, false);
-            return Convert.ToBase64String(cypherTextBArray);
+            var rsa = new RSA(publicKey);
+            return Convert.ToBase64String(rsa.Encrypt(encryptString));
         }
 
         /// <summary>
@@ -114,11 +133,8 @@ namespace Masuit.Tools.Security
         /// <exception cref="CryptographicException">The cryptographic service provider (CSP) cannot be acquired. </exception>
         public static string RSADecrypt(this string mStrDecryptString, string privateKey)
         {
-            using var rsa = new RSACryptoServiceProvider();
-            rsa.FromXmlString(privateKey);
-            var plainTextBArray = Convert.FromBase64String(mStrDecryptString);
-            var dypherTextBArray = rsa.Decrypt(plainTextBArray, false);
-            return new UnicodeEncoding().GetString(dypherTextBArray);
+            var rsa = new RSA(privateKey);
+            return rsa.DecryptOrNull(mStrDecryptString);
         }
 
         /// <summary>
@@ -141,10 +157,8 @@ namespace Masuit.Tools.Security
         /// <exception cref="CryptographicException">The cryptographic service provider (CSP) cannot be acquired. </exception>
         public static string RSADecrypt(this byte[] decryptString, string privateKey)
         {
-            using var rsa = new RSACryptoServiceProvider();
-            rsa.FromXmlString(privateKey);
-            var dypherTextBArray = rsa.Decrypt(decryptString, false);
-            return new UnicodeEncoding().GetString(dypherTextBArray);
+            var rsa = new RSA(privateKey);
+            return new UnicodeEncoding().GetString(rsa.DecryptOrNull(decryptString));
         }
 
         /// <summary>
@@ -232,13 +246,8 @@ namespace Masuit.Tools.Security
         /// <exception cref="CryptographicUnexpectedOperationException">The key is null.-or- The hash algorithm is null. </exception>
         public static byte[] SignatureBytes(this byte[] hashbyteSignature, string privateKey)
         {
-            using var rsa = new RSACryptoServiceProvider();
-            rsa.FromXmlString(privateKey);
-            var rsaFormatter = new RSAPKCS1SignatureFormatter(rsa);
-            //设置签名的算法为MD5 
-            rsaFormatter.SetHashAlgorithm("MD5");
-            //执行签名 
-            return rsaFormatter.CreateSignature(hashbyteSignature);
+            var rsa = new RSA(privateKey);
+            return rsa.Sign("MD5", hashbyteSignature);
         }
 
         /// <summary>
@@ -251,14 +260,7 @@ namespace Masuit.Tools.Security
         /// <exception cref="CryptographicUnexpectedOperationException">The key is null.-or- The hash algorithm is null. </exception>
         public static string SignatureString(this byte[] hashbyteSignature, string privateKey)
         {
-            using var rsa = new RSACryptoServiceProvider();
-            rsa.FromXmlString(privateKey);
-            var rsaFormatter = new RSAPKCS1SignatureFormatter(rsa);
-            //设置签名的算法为MD5 
-            rsaFormatter.SetHashAlgorithm("MD5");
-            //执行签名 
-            var encryptedSignatureData = rsaFormatter.CreateSignature(hashbyteSignature);
-            return Convert.ToBase64String(encryptedSignatureData);
+            return Convert.ToBase64String(SignatureBytes(hashbyteSignature, privateKey));
         }
 
         /// <summary>
@@ -271,14 +273,8 @@ namespace Masuit.Tools.Security
         /// <exception cref="CryptographicUnexpectedOperationException">The key is null.-or- The hash algorithm is null. </exception>
         public static byte[] SignatureBytes(this string mStrHashbyteSignature, string pStrKeyPrivate)
         {
-            byte[] hashbyteSignature = Convert.FromBase64String(mStrHashbyteSignature);
-            using var rsa = new RSACryptoServiceProvider();
-            rsa.FromXmlString(pStrKeyPrivate);
-            var rsaFormatter = new RSAPKCS1SignatureFormatter(rsa);
-            //设置签名的算法为MD5 
-            rsaFormatter.SetHashAlgorithm("MD5");
-            //执行签名 
-            return rsaFormatter.CreateSignature(hashbyteSignature);
+            var rsa = new RSA(pStrKeyPrivate);
+            return Encoding.UTF32.GetBytes(rsa.Sign("MD5", mStrHashbyteSignature));
         }
 
         /// <summary>
@@ -291,15 +287,8 @@ namespace Masuit.Tools.Security
         /// <exception cref="CryptographicUnexpectedOperationException">The key is null.-or- The hash algorithm is null. </exception>
         public static string SignatureString(this string mStrHashbyteSignature, string pStrKeyPrivate)
         {
-            var hashbyteSignature = Convert.FromBase64String(mStrHashbyteSignature);
-            using var rsa = new RSACryptoServiceProvider();
-            rsa.FromXmlString(pStrKeyPrivate);
-            var rsaFormatter = new RSAPKCS1SignatureFormatter(rsa);
-            //设置签名的算法为MD5 
-            rsaFormatter.SetHashAlgorithm("MD5");
-            //执行签名 
-            var encryptedSignatureData = rsaFormatter.CreateSignature(hashbyteSignature);
-            return Convert.ToBase64String(encryptedSignatureData);
+            var rsa = new RSA(pStrKeyPrivate);
+            return rsa.Sign("MD5", mStrHashbyteSignature);
         }
 
         #endregion
@@ -317,13 +306,8 @@ namespace Masuit.Tools.Security
         /// <exception cref="CryptographicUnexpectedOperationException">The key is null.-or- The hash algorithm is null. </exception>
         public static bool SignatureDeformatter(this byte[] deformatterData, string publicKey, byte[] hashbyteDeformatter)
         {
-            using var rsa = new RSACryptoServiceProvider();
-            rsa.FromXmlString(publicKey);
-            var rsaDeformatter = new RSAPKCS1SignatureDeformatter(rsa);
-            //指定解密的时候HASH算法为MD5 
-            rsaDeformatter.SetHashAlgorithm("MD5");
-            if (rsaDeformatter.VerifySignature(hashbyteDeformatter, deformatterData)) return true;
-            return false;
+            var rsa = new RSA(publicKey);
+            return rsa.Verify("MD5", deformatterData, hashbyteDeformatter);
         }
 
         /// <summary>
@@ -337,14 +321,8 @@ namespace Masuit.Tools.Security
         /// <exception cref="CryptographicUnexpectedOperationException">The key is null.-or- The hash algorithm is null. </exception>
         public static bool SignatureDeformatter(this byte[] deformatterData, string publicKey, string pStrHashbyteDeformatter)
         {
-            byte[] hashbyteDeformatter = Convert.FromBase64String(pStrHashbyteDeformatter);
-            using var rsa = new RSACryptoServiceProvider();
-            rsa.FromXmlString(publicKey);
-            var rsaDeformatter = new RSAPKCS1SignatureDeformatter(rsa);
-            //指定解密的时候HASH算法为MD5 
-            rsaDeformatter.SetHashAlgorithm("MD5");
-            if (rsaDeformatter.VerifySignature(hashbyteDeformatter, deformatterData)) return true;
-            return false;
+            var rsa = new RSA(publicKey);
+            return rsa.Verify("MD5", deformatterData, Convert.FromBase64String(pStrHashbyteDeformatter));
         }
 
         /// <summary>
@@ -358,14 +336,8 @@ namespace Masuit.Tools.Security
         /// <exception cref="CryptographicUnexpectedOperationException">The key is null.-or- The hash algorithm is null. </exception>
         public static bool SignatureDeformatter(this string pStrDeformatterData, string publicKey, byte[] hashbyteDeformatter)
         {
-            using var rsa = new RSACryptoServiceProvider();
-            rsa.FromXmlString(publicKey);
-            var rsaDeformatter = new RSAPKCS1SignatureDeformatter(rsa);
-            //指定解密的时候HASH算法为MD5 
-            rsaDeformatter.SetHashAlgorithm("MD5");
-            var deformatterData = Convert.FromBase64String(pStrDeformatterData);
-            if (rsaDeformatter.VerifySignature(hashbyteDeformatter, deformatterData)) return true;
-            return false;
+            var rsa = new RSA(publicKey);
+            return rsa.Verify("MD5", Convert.FromBase64String(pStrDeformatterData), hashbyteDeformatter);
         }
 
         /// <summary>
@@ -379,15 +351,8 @@ namespace Masuit.Tools.Security
         /// <exception cref="CryptographicUnexpectedOperationException">The key is null.-or- The hash algorithm is null. </exception>
         public static bool SignatureDeformatter(this string pStrDeformatterData, string publicKey, string pStrHashbyteDeformatter)
         {
-            byte[] hashbyteDeformatter = Convert.FromBase64String(pStrHashbyteDeformatter);
-            using var rsa = new RSACryptoServiceProvider();
-            rsa.FromXmlString(publicKey);
-            var rsaDeformatter = new RSAPKCS1SignatureDeformatter(rsa);
-            //指定解密的时候HASH算法为MD5 
-            rsaDeformatter.SetHashAlgorithm("MD5");
-            var deformatterData = Convert.FromBase64String(pStrDeformatterData);
-            if (rsaDeformatter.VerifySignature(hashbyteDeformatter, deformatterData)) return true;
-            return false;
+            var rsa = new RSA(publicKey);
+            return rsa.Verify("MD5", Convert.FromBase64String(pStrDeformatterData), Convert.FromBase64String(pStrHashbyteDeformatter));
         }
 
         #endregion
